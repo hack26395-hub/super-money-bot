@@ -65,4 +65,3 @@ def finalize(message):
     bot.send_message(message.chat.id, "✅ تم إرسال طلب السحب للموقع! ستصلك رسالة تأكيد على هاتفك فور وصول المبلغ لمحفظتك.")
 
 bot.polling()
-    
