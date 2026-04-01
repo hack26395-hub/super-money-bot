@@ -6,8 +6,8 @@ from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# --- إعدادات قاعدة البيانات ---
-DB_NAME = "users_data.db"
+# --- إعدادات قاعدة البيانات (SQLite) لضمان بقاء الرصيد ---
+DB_NAME = "users_v82.db"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -17,7 +17,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-def get_user(user_id):
+def get_user_db(user_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT balance, invites, clicks FROM users WHERE user_id=?", (user_id,))
@@ -26,10 +26,10 @@ def get_user(user_id):
     if row: return {"balance": row[0], "invites": row[1], "clicks": row[2]}
     return {"balance": 0.0, "invites": 0, "clicks": 0}
 
-def update_user(user_id, balance=None, invites=None, clicks=None):
+def update_user_db(user_id, balance=None, invites=None, clicks=None):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    user = get_user(user_id)
+    user = get_user_db(user_id)
     new_bal = balance if balance is not None else user["balance"]
     new_inv = invites if invites is not None else user["invites"]
     new_clk = clicks if clicks is not None else user["clicks"]
@@ -46,8 +46,8 @@ FINAL_AD_LINK = "https://ouo.io/Q8wFlh"
 app = Flask(__name__)
 tg_app = Application.builder().token(TOKEN).build()
 
-# دالة لإرسال رسالة للمستخدم من داخل السيرفر
-def send_vpn_warning(user_id):
+# دالة إرسال التنبيه الفوري للمستخدم
+def send_instant_warning(user_id):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     warning_text = (
@@ -61,20 +61,18 @@ def send_vpn_warning(user_id):
     loop.run_until_complete(tg_app.bot.send_message(chat_id=user_id, text=warning_text, parse_mode="Markdown"))
 
 @app.route('/')
-def home(): return "✅ System V8.1 Online"
+def home(): return "✅ Bot v8.2 Permanent DB Online"
 
 @app.route('/click/<int:user_id>')
 def register_click(user_id):
-    user = get_user(user_id)
-    new_clicks = user["clicks"] + 1
-    new_balance = user["balance"] + 0.0200
+    user = get_user_db(user_id)
+    new_clk = user["clicks"] + 1
+    new_bal = user["balance"] + 0.0200
+    update_user_db(user_id, balance=new_bal, clicks=new_clk)
     
-    update_user(user_id, balance=new_balance, clicks=new_clicks)
-    
-    # إذا خلص الـ 4 روابط، نبعت له الرسالة فوراً على التلجرام
-    if new_clicks >= 4:
-        Thread(target=send_vpn_warning, args=(user_id,)).start()
-        update_user(user_id, clicks=0) # تصفير العداد للمرة الجاية بعد الـ VPN
+    if new_clk >= 4:
+        Thread(target=send_instant_warning, args=(user_id,)).start()
+        update_user_db(user_id, clicks=0) # تصفير العداد للمرة القادمة
         
     return redirect(FINAL_AD_LINK)
 
@@ -82,38 +80,67 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- أوامر التلجرام ---
+# --- واجهة البوت والأزرار ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    db = get_user(user.id)
+    
+    # معالجة الإحالة عند الدخول أول مرة
+    if context.args and context.args[0].isdigit():
+        ref_id = int(context.args[0])
+        if ref_id != user.id:
+            conn = sqlite3.connect(DB_NAME)
+            c = conn.cursor()
+            c.execute("SELECT user_id FROM users WHERE user_id=?", (user.id,))
+            if not c.fetchone(): # المستخدم جديد فعلاً
+                inviter = get_user_db(ref_id)
+                update_user_db(ref_id, balance=inviter["balance"] + 0.20, invites=inviter["invites"] + 1)
+            conn.close()
+
+    db = get_user_db(user.id)
     magic_url = f"{SERVER_URL}/click/{user.id}"
     
     welcome_text = (
-        f"🛡️ **محفظة الشحن الدائمة**\n"
+        f"🛡️ **محفظة الشحن الدائمة V8.2**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"💰 الرصيد الحالي: `{db['balance']:.4f}$` \n"
         f"👥 الإحالات: `{db['invites']}`\n\n"
-        f"✅ رصيدك محفوظ في قاعدة البيانات."
+        f"✅ رصيدك محفوظ ولن يتغير عند التحديث."
     )
-    kb = [[InlineKeyboardButton(f"💳 بطاقة تفعيل {i:02d}", url=magic_url) for i in range(1, 3)],
-          [InlineKeyboardButton(f"💳 بطاقة تفعيل {i:02d}", url=magic_url) for i in range(3, 5)],
-          [InlineKeyboardButton("🔄 تحديث الرصيد", callback_data="ref")]]
+    
+    kb = [
+        [InlineKeyboardButton("💳 بطاقة تفعيل 01", url=magic_url), InlineKeyboardButton("💳 بطاقة تفعيل 02", url=magic_url)],
+        [InlineKeyboardButton("💳 بطاقة تفعيل 03", url=magic_url), InlineKeyboardButton("💳 بطاقة تفعيل 04", url=magic_url)],
+        [InlineKeyboardButton("🔄 تحديث الرصيد", callback_data="ref"), InlineKeyboardButton("💎 تحويل للجواهر", callback_data="draw")],
+        [InlineKeyboardButton("👥 دعوة الأصدقاء (+0.20$)", callback_data="share")]
+    ]
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    db = get_user(query.from_user.id)
+    user_id = query.from_user.id
+    db = get_user_db(user_id)
     await query.answer()
+    
     if query.data == "ref":
-        await query.edit_message_text(f"💰 **الرصيد المحدث:** `{db['balance']:.4f}$`", 
-                                     reply_markup=query.message.reply_markup, parse_mode="Markdown")
+        await query.edit_message_text(
+            f"💰 **تم تحديث الرصيد:** `{db['balance']:.4f}$` \n\nاضغط على البطاقات لزيادة أرباحك!",
+            reply_markup=query.message.reply_markup, parse_mode="Markdown"
+        )
+    elif query.data == "draw":
+        if db["balance"] < 8.0:
+            await query.message.reply_text(f"❌ فشل النظام: رصيدك `{db['balance']:.4f}$` أقل من الحد الأدنى (8$).")
+        else:
+            await query.message.reply_text("✅ رصيدك جاهز! أرسل الآيدي الخاص بك.")
+    elif query.data == "share":
+        bot_info = await context.bot.get_me()
+        await query.message.reply_text(f"🔗 **رابط إحالتك:**\n`https://t.me/{bot_info.username}?start={user_id}`")
 
 def main():
     init_db()
     Thread(target=run_flask).start()
     tg_app.add_handler(CommandHandler("start", start))
     tg_app.add_handler(CallbackQueryHandler(handle_callback))
-    print("🚀 BOT V8.1 LIVE ON RENDER")
+    print("🚀 BOT V8.2 IS LIVE WITH ALL FEATURES")
     tg_app.run_polling()
 
 if __name__ == "__main__": main()
