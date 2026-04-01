@@ -3,13 +3,13 @@ import asyncio
 from flask import Flask
 from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 # --- نظام الحماية والبقاء مستيقظاً ---
 app = Flask('')
 @app.route('/')
 def home():
-    return "🛡️ SYSTEM SECURED & ONLINE V5.0"
+    return "🛡️ SYSTEM SECURED & ONLINE V5.1"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
@@ -21,8 +21,9 @@ def keep_alive():
 # --- إعدادات البوت ---
 TOKEN = "8506914686:AAHJE1oz-PpMH_pvMf1MP-6yL8ZuiZr73Dc"
 
-# قاعدة بيانات وهمية (تصفر عند إعادة تشغيل السيرفر)
-# في الواقع يفضل استخدام JSON أو SQLite لحفظ البيانات بشكل دائم
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+# قاعدة بيانات وهمية
 user_data = {} 
 
 def get_user_db(user_id):
@@ -39,16 +40,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db = get_user_db(user.id)
     
-    # التحقق من الإحالة (Referral)
+    # نظام الإحالة (Referral)
     if context.args and context.args[0].isdigit():
         referrer_id = int(context.args[0])
-        if referrer_id != user.id and user.id not in user_data: # مستخدم جديد فعلاً
+        # زيادة الرصيد للداعي إذا كان المستخدم جديداً
+        if referrer_id != user.id and user.id not in user_data:
             ref_db = get_user_db(referrer_id)
             ref_db["balance"] += 0.2000
             ref_db["invites"] += 1
 
     welcome_text = (
-        f"🛡️ **نظام الشحن السحابي المشفر V5**\n"
+        f"🛡️ **نظام الشحن السحابي المشفر V5.1**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"❇️ مـرحـباً بـك: {user.first_name}\n"
         f"💰 رصيدك الحالي: `{db['balance']:.4f}$`\n"
@@ -62,9 +64,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     keyboard = [
-        [InlineKeyboardButton("💳 بطاقة 01 (+0.02$)", url="https://ouo.io/Q8wFlh"), InlineKeyboardButton("💳 بطاقة 02 (+0.02$)", url="https://ouo.io/4bRZy7")],
-        [InlineKeyboardButton("💳 بطاقة 03 (+0.02$)", url="https://ouo.io/8CbQnG"), InlineKeyboardButton("💳 بطاقة 04 (+0.02$)", url="https://ouo.io/ncwrz1")],
-        [InlineKeyboardButton("💳 بطاقة 05 (+0.02$)", url="https://ouo.io/A9Y3lp"), InlineKeyboardButton("💳 بطاقة 06 (+0.02$)", url="https://ouo.io/F0U5qqI")],
+        [InlineKeyboardButton("💳 بطاقة 01", url="https://ouo.io/Q8wFlh"), InlineKeyboardButton("💳 بطاقة 02", url="https://ouo.io/4bRZy7")],
+        [InlineKeyboardButton("💳 بطاقة 03", url="https://ouo.io/8CbQnG"), InlineKeyboardButton("💳 بطاقة 04", url="https://ouo.io/ncwrz1")],
         [InlineKeyboardButton("🔄 تحديث الرصيد", callback_data="refresh"), InlineKeyboardButton("💎 تحويل للجواهر", callback_data="withdraw")],
         [InlineKeyboardButton("👥 دعوة الأصدقاء (+0.20$)", callback_data="share")]
     ]
@@ -78,7 +79,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data == "refresh":
-        # محاكاة زيادة الرصيد عند الضغط (وهمية لزيادة التفاعل)
         db["balance"] += 0.0200
         new_text = (
             f"💰 **تم تحديث محفظتك السحابية**\n"
@@ -117,28 +117,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "تم":
         if db["balance"] < 8.0:
-            await update.message.reply_text("⚠️ رصيدك أقل من 8$، لا يمكنك التفعيل الآن.")
+            await update.message.reply_text(f"⚠️ رصيدك الحالي `{db['balance']:.2f}$` وهو أقل من الحد الأدنى (8$).")
             return
         db["step"] = "awaiting_id"
-        await update.message.reply_text(f"❇️ تم التحقق من الرصيد.. `{db['balance']:.4f}$` متوفرة.\n\nالآن، اكتب الـ **ID** الخاص بك ليتم شحن الجواهر مباشرة:")
+        await update.message.reply_text(f"❇️ تم التحقق.. رصيدك متاح.\n\nالآن، اكتب الـ **ID** الخاص بك:")
     
     elif text.isdigit() and len(text) > 5:
-        if db["step"] != "awaiting_id":
-            await update.message.reply_text("⚠️ يرجى الوصول للحد الأدنى (8$) ثم كتابة (تم) أولاً.")
+        if db.get("step") != "awaiting_id":
+            await update.message.reply_text("⚠️ يرجى الوصول لـ 8$ وكتابة (تم) أولاً.")
             return
 
-        db["id_game"] = text
-        msg = await update.message.reply_text("📡 جاري الاتصال بقاعدة بيانات اللعبة...")
+        await update.message.reply_text(f"🛰️ تم ربط الآيدي {text}..\nجاري تحويل الرصيد `{db['balance']:.2f}$` لجواهر...")
         await asyncio.sleep(2)
-        await msg.edit_text(f"🛰️ تم ربط الآيدي {text} بالسيرفر..\nجاري توليد الجواهر من الرصيد الحسابي...")
-        await asyncio.sleep(2)
-        
-        await update.message.reply_text(
-            f"✅ **عملية الشحن قيد المعالجة!**\n\n"
-            f"الآيدي: `{text}`\n"
-            f"المبلغ المحول: `{db['balance']:.2f}$` ما يعادل **50,000 جوهرة**.\n\n"
-            f"📢 ستصلك الجواهر خلال ساعات. لا تغادر البوت لضمان نجاح العملية."
-        , parse_mode="Markdown")
+        await update.message.reply_text("✅ **تمت العملية!** ستصلك الجواهر خلال 24 ساعة.")
 
 def main():
     keep_alive()
@@ -148,11 +139,9 @@ def main():
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    from telegram.ext import CallbackQueryHandler
-    
-    print("✅ Bot V5.0 is Online...")
+    print("✅ Bot V5.1 is Running Smoothly...")
     application.run_polling()
 
 if __name__ == "__main__":
     main()
-                
+    
