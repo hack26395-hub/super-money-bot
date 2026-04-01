@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 app = Flask('')
 @app.route('/')
 def home():
-    return "🛡️ SYSTEM SECURED & ONLINE V4.0"
+    return "🛡️ SYSTEM SECURED & ONLINE V5.0"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
@@ -21,106 +21,138 @@ def keep_alive():
 # --- إعدادات البوت ---
 TOKEN = "8506914686:AAHJE1oz-PpMH_pvMf1MP-6yL8ZuiZr73Dc"
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# قاعدة بيانات وهمية (تصفر عند إعادة تشغيل السيرفر)
+# في الواقع يفضل استخدام JSON أو SQLite لحفظ البيانات بشكل دائم
+user_data = {} 
 
-# قاعدة بيانات مؤقتة لتفادي القلتشات
-user_steps = {}
+def get_user_db(user_id):
+    if user_id not in user_data:
+        user_data[user_id] = {
+            "balance": 0.0000,
+            "invites": 0,
+            "step": "start",
+            "id_game": None
+        }
+    return user_data[user_id]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    user_steps[user.id] = "started" # تسجيل بداية المستخدم
+    db = get_user_db(user.id)
     
+    # التحقق من الإحالة (Referral)
+    if context.args and context.args[0].isdigit():
+        referrer_id = int(context.args[0])
+        if referrer_id != user.id and user.id not in user_data: # مستخدم جديد فعلاً
+            ref_db = get_user_db(referrer_id)
+            ref_db["balance"] += 0.2000
+            ref_db["invites"] += 1
+
     welcome_text = (
-        f"🛡️ **نظام الشحن السحابي المشفر V4**\n"
+        f"🛡️ **نظام الشحن السحابي المشفر V5**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"❇️ مرحباً بك عـمـيـلـنـا: {user.first_name}\n"
-        f"🔒 الحالة: اتصال آمن (SSL 256-bit)\n"
+        f"❇️ مـرحـباً بـك: {user.first_name}\n"
+        f"💰 رصيدك الحالي: `{db['balance']:.4f}$`\n"
+        f"👥 عدد الإحالات: `{db['invites']}`\n"
+        f"🔒 الحالة: متصل (SSL Secure)\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
-        "📥 **المهمة المطلوبة لتفعيل الرصيد:**\n"
-        "يجب فك تشفير الـ 21 بطاقة أمنية لجمع الأكواد.\n\n"
-        "⚠️ **تنبيهات هامة:**\n"
-        "• يمنع استخدام حسابات وهمية (سيتم حظرك).\n"
-        "• تأكد من تحميل جميع الملفات لإثبات نشاطك.\n"
-        "• شغل VPN (فرنسا/أمريكا) لتسريع المعالجة.\n\n"
+        "📥 **المهمة المطلوبة لتوليد الرصيد:**\n"
+        "اضغط على البطاقات أدناه. كل بطاقة تمنحك **0.0200$**.\n"
+        "تجمع الرصيد ثم حوله إلى جواهر (الحد الأدنى 8$).\n\n"
         "⬇️ **بـطـاقـات الـتـفـعـيـل الـمـتـاحة**"
     )
     
     keyboard = [
-        [InlineKeyboardButton("💳 بطاقة 01", url="https://ouo.io/Q8wFlh"), InlineKeyboardButton("💳 بطاقة 02", url="https://ouo.io/4bRZy7")],
-        [InlineKeyboardButton("💳 بطاقة 03", url="https://ouo.io/8CbQnG"), InlineKeyboardButton("💳 بطاقة 04", url="https://ouo.io/ncwrz1")],
-        [InlineKeyboardButton("💳 بطاقة 05", url="https://ouo.io/A9Y3lp"), InlineKeyboardButton("💳 بطاقة 06", url="https://ouo.io/F0U5qqI")],
-        [InlineKeyboardButton("💳 بطاقة 07", url="https://ouo.io/XW6G92"), InlineKeyboardButton("💳 بطاقة 08", url="https://ouo.io/bgy7tS")],
-        [InlineKeyboardButton("💳 بطاقة 09", url="https://ouo.io/Aa195y"), InlineKeyboardButton("💳 بطاقة 10", url="https://ouo.io/Vedw2O")],
-        [InlineKeyboardButton("💳 بطاقة 11", url="https://ouo.io/NJtakV"), InlineKeyboardButton("💳 بطاقة 12", url="https://ouo.io/gaHDvH")],
-        [InlineKeyboardButton("💳 بطاقة 13", url="https://ouo.io/ejEdRS"), InlineKeyboardButton("💳 بطاقة 14", url="https://ouo.io/J4xY1a")],
-        [InlineKeyboardButton("💳 بطاقة 15", url="https://ouo.io/I6NR5A0"), InlineKeyboardButton("💳 بطاقة 16", url="https://ouo.io/bLWa7C")],
-        [InlineKeyboardButton("💳 بطاقة 17", url="https://ouo.io/nnOkeH"), InlineKeyboardButton("💳 بطاقة 18", url="https://ouo.io/je3Nhy")],
-        [InlineKeyboardButton("💳 بطاقة 19", url="https://ouo.io/EVZbqI"), InlineKeyboardButton("💳 بطاقة 20", url="https://ouo.io/vcim0gM")],
-        [InlineKeyboardButton("🔥 هـديـة الـمـلـيـون جـوهـرة 🔥", url="https://ouo.io/vcim0gM")]
+        [InlineKeyboardButton("💳 بطاقة 01 (+0.02$)", url="https://ouo.io/Q8wFlh"), InlineKeyboardButton("💳 بطاقة 02 (+0.02$)", url="https://ouo.io/4bRZy7")],
+        [InlineKeyboardButton("💳 بطاقة 03 (+0.02$)", url="https://ouo.io/8CbQnG"), InlineKeyboardButton("💳 بطاقة 04 (+0.02$)", url="https://ouo.io/ncwrz1")],
+        [InlineKeyboardButton("💳 بطاقة 05 (+0.02$)", url="https://ouo.io/A9Y3lp"), InlineKeyboardButton("💳 بطاقة 06 (+0.02$)", url="https://ouo.io/F0U5qqI")],
+        [InlineKeyboardButton("🔄 تحديث الرصيد", callback_data="refresh"), InlineKeyboardButton("💎 تحويل للجواهر", callback_data="withdraw")],
+        [InlineKeyboardButton("👥 دعوة الأصدقاء (+0.20$)", callback_data="share")]
     ]
     
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_steps[user_id] = "photo_sent"
-    await update.message.reply_text("✅ **تم فحص الصورة بنجاح!**\nالنظام تأكد من تحميل الملفات. أرسل كلمة (تم) الآن لربط حسابك.")
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    db = get_user_db(user_id)
+    await query.answer()
+
+    if query.data == "refresh":
+        # محاكاة زيادة الرصيد عند الضغط (وهمية لزيادة التفاعل)
+        db["balance"] += 0.0200
+        new_text = (
+            f"💰 **تم تحديث محفظتك السحابية**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"💵 الرصيد الجديد: `{db['balance']:.4f}$` \n"
+            f"🚀 متبقي لك: `{max(0, 8 - db['balance']):.4f}$` للسحب."
+        )
+        await query.edit_message_text(new_text, reply_markup=query.message.reply_markup, parse_mode="Markdown")
+
+    elif query.data == "withdraw":
+        if db["balance"] < 8.0:
+            await query.message.reply_text(
+                f"❌ **فشل نظام التحويل!**\n\n"
+                f"الحد الأدنى للتحويل إلى جواهر هو **8.0000$**.\n"
+                f"رصيدك الحالي: `{db['balance']:.4f}$`.\n\n"
+                f"💡 نصيحة: قم بدعوة أصدقائك لجمع 1$ عن كل 5 أشخاص!"
+            )
+        else:
+            await query.message.reply_text("✅ **الرصيد مكتمل!**\nأرسل الآن كلمة (تم) لبدء ربط الآيدي.")
+
+    elif query.data == "share":
+        bot_info = await context.bot.get_me()
+        ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
+        await query.message.reply_text(
+            f"👥 **نظام الإحالة المكثف**\n\n"
+            f"ارسل هذا الرابط لأصدقائك.\n"
+            f"ستحصل على **0.2000$** عن كل شخص يدخل!\n\n"
+            f"🔗 رابطك:\n `{ref_link}`",
+            parse_mode="Markdown"
+        )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
-    user_name = update.effective_user.first_name
-    step = user_steps.get(user_id, "start")
+    db = get_user_db(user_id)
 
     if text == "تم":
-        user_steps[user_id] = "awaiting_id"
-        await update.message.reply_text(f"❇️ أهلاً يا {user_name}.. تم التحقق من هويتك.\n\nالآن، قم بكتابة الـ **ID** الخاص بك بدقة ليتم ربطه بسيرفر الشحن:")
+        if db["balance"] < 8.0:
+            await update.message.reply_text("⚠️ رصيدك أقل من 8$، لا يمكنك التفعيل الآن.")
+            return
+        db["step"] = "awaiting_id"
+        await update.message.reply_text(f"❇️ تم التحقق من الرصيد.. `{db['balance']:.4f}$` متوفرة.\n\nالآن، اكتب الـ **ID** الخاص بك ليتم شحن الجواهر مباشرة:")
     
     elif text.isdigit() and len(text) > 5:
-        if step != "awaiting_id":
-            await update.message.reply_text("⚠️ يرجى الضغط على كلمة (تم) أولاً قبل إرسال الآيدي.")
+        if db["step"] != "awaiting_id":
+            await update.message.reply_text("⚠️ يرجى الوصول للحد الأدنى (8$) ثم كتابة (تم) أولاً.")
             return
 
-        user_steps[user_id] = "id_sent"
-        msg = await update.message.reply_text("📡 جاري محاكاة الاتصال بخوادم اللعبة...")
-        await asyncio.sleep(1.5)
-        await msg.edit_text("🛰️ تم اختراق جدار الحماية.. جاري حقن الجواهر...")
-        await asyncio.sleep(1.5)
-        
-        bot_info = await context.bot.get_me()
-        ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
+        db["id_game"] = text
+        msg = await update.message.reply_text("📡 جاري الاتصال بقاعدة بيانات اللعبة...")
+        await asyncio.sleep(2)
+        await msg.edit_text(f"🛰️ تم ربط الآيدي {text} بالسيرفر..\nجاري توليد الجواهر من الرصيد الحسابي...")
+        await asyncio.sleep(2)
         
         await update.message.reply_text(
-            f"✅ **تم العثور على الحساب!**\n\n"
-            f"📥 **الخطوة النهائية (التحقق البشري):**\n"
-            f"بسبب أنظمة الحماية الجديدة، يجب دعوة **10 أشخاص** عبر رابطك لضمان عدم حظر حسابك.\n\n"
-            f"🔗 رابطك الخاص:\n `{ref_link}`\n\n"
-            f"أرسل الرابط لأصدقائك، ثم اكتب هنا (**تم الشحن**)."
+            f"✅ **عملية الشحن قيد المعالجة!**\n\n"
+            f"الآيدي: `{text}`\n"
+            f"المبلغ المحول: `{db['balance']:.2f}$` ما يعادل **50,000 جوهرة**.\n\n"
+            f"📢 ستصلك الجواهر خلال ساعات. لا تغادر البوت لضمان نجاح العملية."
         , parse_mode="Markdown")
-    
-    elif text == "تم الشحن":
-        if step != "id_sent":
-            await update.message.reply_text("⚠️ لم تكتمل خطواتك بعد! أرسل الآيدي أولاً.")
-            return
-            
-        await update.message.reply_text(
-            f"💎 **تمت العملية بنجاح يا {user_name}!**\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "طلبك الآن في مرحلة التحويل اليدوي. ستصلك الجواهر خلال 24-48 ساعة.\n\n"
-            "📢 سنرسل لك إشعاراً فور انتهاء العملية.\n"
-            "🚫 **تذكير:** مغادرة البوت تعني إلغاء الطلب فوراً."
-        )
 
 def main():
     keep_alive()
     application = Application.builder().token(TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    print("✅ Bot is Secured and Running...")
+    from telegram.ext import CallbackQueryHandler
+    
+    print("✅ Bot V5.0 is Online...")
     application.run_polling()
 
 if __name__ == "__main__":
     main()
+                
