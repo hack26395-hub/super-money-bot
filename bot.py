@@ -1,163 +1,159 @@
 import os
-import sqlite3
-import asyncio
-from flask import Flask, redirect
-from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+import time
+import telebot
+import google.generativeai as genai
+from docx import Document
+from docx.shared import RGBColor, Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# --- إعدادات قاعدة البيانات (تطوير V9.0) ---
-DB_NAME = "users_pro_v9.db"
+# --- بيانات الوصول المباشرة ---
+TELEGRAM_TOKEN = "8433118363:AAH0iqeZVo3xz-KP_KQ7LxHSdhRZnOmb2LQ"
+GEMINI_API_KEY = "AIzaSyCChd6IL-8hi9ttKOIwH-vVF57MzK8X26s"
 
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users 
-                 (user_id INTEGER PRIMARY KEY, balance REAL, invites INTEGER, clicks INTEGER, level TEXT)''')
-    conn.commit()
-    conn.close()
+# إعداد محرك الذكاء الاصطناعي (نسخة المطور قيس)
+genai.configure(api_key=GEMINI_API_KEY)
+ai_config = {
+    "temperature": 0.75,
+    "top_p": 0.9,
+    "max_output_tokens": 4096,
+}
 
-def get_user_db(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT balance, invites, clicks, level FROM users WHERE user_id=?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    if row: return {"balance": row[0], "invites": row[1], "clicks": row[2], "level": row[3]}
-    return {"balance": 0.0, "invites": 0, "clicks": 0, "level": "مبتدئ 🌱"}
+# تعليمات النظام لتعزيز شخصية البوت
+SYSTEM_PROMPT = (
+    "أنت نظام ذكاء اصطناعي متطور جداً، تم إنشاؤك وتطويرك بواسطة المطور (قيس). "
+    "مهمتك الأساسية هي ترجمة النصوص من الإنجليزية إلى العربية بدقة متناهية وأسلوب بلاغي رائع. "
+    "يجب أن تظهر الترجمة كأنها مكتوبة بيد خبير، مع الحفاظ على روح النص الأصلي."
+)
 
-def update_user_db(user_id, balance=None, invites=None, clicks=None):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    user = get_user_db(user_id)
+ai_model = genai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+    generation_config=ai_config,
+    system_instruction=SYSTEM_PROMPT
+)
+
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+# دالة الترجمة المحمية من القلتشات
+def perform_smart_translation(text_content):
+    if not text_content or len(text_content.strip()) < 2:
+        return None
     
-    new_bal = balance if balance is not None else user["balance"]
-    new_inv = invites if invites is not None else user["invites"]
-    new_clk = clicks if clicks is not None else user["clicks"]
-    
-    # تحديد المستوى بناءً على الرصيد
-    new_lvl = "مبتدئ 🌱"
-    if new_bal > 5: new_lvl = "محترف ⚡"
-    if new_bal > 15: new_lvl = "ملك الشحن 👑"
-    
-    c.execute("INSERT OR REPLACE INTO users (user_id, balance, invites, clicks, level) VALUES (?, ?, ?, ?, ?)",
-              (user_id, new_bal, new_inv, new_clk, new_lvl))
-    conn.commit()
-    conn.close()
+    attempts = 0
+    while attempts < 3:
+        try:
+            prompt = f"Translate the following English text into professional, fluent Arabic:\n\n{text_content}"
+            response = ai_model.generate_content(prompt)
+            if response and response.text:
+                return response.text.strip()
+            return None
+        except Exception as error:
+            attempts += 1
+            time.sleep(2)
+    return None
 
-# --- إعدادات السيرفر والتلجرام ---
-TOKEN = "8506914686:AAHJE1oz-PpMH_pvMf1MP-6yL8ZuiZr73Dc"
-SERVER_URL = "https://super-money-bot-2.onrender.com"
-FINAL_AD_LINK = "https://ouo.io/Q8wFlh"
-
-app = Flask(__name__)
-tg_app = Application.builder().token(TOKEN).build()
-
-def send_instant_warning(user_id):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    warning_text = (
-        "🛑 **إيقاف مؤقت للنظام!**\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "نظام الحماية اكتشف استهلاكاً عالياً للنقرات من منطقتك.\n\n"
-        "⚠️ **لتجنب حظر حسابك:**\n"
-        "1️⃣ أغلق البوت تماماً.\n"
-        "2️⃣ قم بتشغيل الـ **VPN** (دولة ألمانيا 🇩🇪 أو أمريكا 🇺🇸).\n"
-        "3️⃣ أعد المحاولة بعد دقيقة واحدة.\n\n"
-        "*سيتم تجميد الأرباح في حال مخالفة التعليمات!*"
-    )
-    loop.run_until_complete(tg_app.bot.send_message(chat_id=user_id, text=warning_text, parse_mode="Markdown"))
-
-@app.route('/')
-def home(): return "💎 GemsMatrix PRO V9.0 IS ACTIVE"
-
-@app.route('/click/<int:user_id>')
-def register_click(user_id):
-    user = get_user_db(user_id)
-    new_clk = user["clicks"] + 1
-    new_bal = user["balance"] + 0.0200
-    update_user_db(user_id, balance=new_bal, clicks=new_clk)
-    
-    if new_clk >= 4:
-        Thread(target=send_instant_warning, args=(user_id,)).start()
-        update_user_db(user_id, clicks=0) 
-        
-    return redirect(FINAL_AD_LINK)
-
-# --- واجهة البوت المطورة ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    
-    # نظام الإحالة المتطور
-    if context.args and context.args[0].isdigit():
-        ref_id = int(context.args[0])
-        if ref_id != user.id:
-            conn = sqlite3.connect(DB_NAME)
-            c = conn.cursor()
-            c.execute("SELECT user_id FROM users WHERE user_id=?", (user.id,))
-            if not c.fetchone(): 
-                inviter = get_user_db(ref_id)
-                update_user_db(ref_id, balance=inviter["balance"] + 0.20, invites=inviter["invites"] + 1)
-            conn.close()
-
-    db = get_user_db(user.id)
-    magic_url = f"{SERVER_URL}/click/{user.id}"
-    
+# رسالة الترحيب - بالعربي أولاً كما طلبت
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome_message(message):
     welcome_text = (
-        f"💎 **مرحباً بك في GemsMatrix PRO**\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"👤 المستـخدم: `{user.first_name}`\n"
-        f"🏆 المستـوى: *{db['level']}*\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"💰 الرصـيد: `{db['balance']:.4f}$` \n"
-        f"👥 الإحالات: `{db['invites']}` شخص\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"⚠️ *ملاحظة: الرصيد يحدث تلقائياً عند الضغط على التحديث.*"
+        "مرحباً بك! أنا نظام ترجمة الملفات الذكي، نسخة مطورة ومحدثة بالكامل من قبل المطور **قيس**.\n\n"
+        "Welcome! I am a smart file translation system, a fully developed and updated version by the developer **Qais**.\n\n"
+        "--- المميزات / Features ---\n"
+        "✅ الحفاظ على الصور والجداول / Preserves images and tables.\n"
+        "✅ ترجمة تحت كل سطر / Interlinear translation.\n"
+        "✅ تنسيق لوني مريح / Comfortable color formatting.\n\n"
+        "أرسل ملف .docx للبدء / Send a .docx file to start."
     )
+    bot.reply_to(message, welcome_text, parse_mode="Markdown")
+
+# معالجة المستندات
+@bot.message_handler(content_types=['document'])
+def handle_incoming_document(message):
+    file_name = message.document.file_name
     
-    kb = [
-        [InlineKeyboardButton("💳 شحن بطاقة (A)", url=magic_url), InlineKeyboardButton("💳 شحن بطاقة (B)", url=magic_url)],
-        [InlineKeyboardButton("💳 شحن بطاقة (C)", url=magic_url), InlineKeyboardButton("💳 شحن بطاقة (D)", url=magic_url)],
-        [InlineKeyboardButton("📊 تحديث الحساب", callback_data="ref"), InlineKeyboardButton("🏦 سحب الأرباح", callback_data="draw")],
-        [InlineKeyboardButton("🎁 مكافأة الإحالة (+0.20$)", callback_data="share")]
-    ]
-    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+    # فحص الامتداد
+    if not file_name.lower().endswith('.docx'):
+        bot.reply_to(message, "❌ Please send a .docx file only.")
+        return
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    db = get_user_db(user_id)
-    await query.answer()
+    # رسالة الانتظار بالإنجليزي كما طلبت
+    progress_msg = bot.reply_to(message, "Please wait...")
     
-    if query.data == "ref":
-        await query.edit_message_text(
-            f"🔄 **تم مزامنة البيانات بنجاح!**\n\n"
-            f"💰 رصيدك الحالي: `{db['balance']:.4f}$` \n"
-            f"🏅 مستواك الحالي: *{db['level']}*\n\n"
-            f"استمر في الضغط لزيادة أرباحك اليومية!",
-            reply_markup=query.message.reply_markup, parse_mode="Markdown"
-        )
-    elif query.data == "draw":
-        if db["balance"] < 8.0:
-            await query.message.reply_text(f"⚠️ **عذراً، الوصول مرفوض!**\n\nيجب أن يصل رصيدك إلى **8.00$** على الأقل.\nنقصك الحالي: `{8.0 - db['balance']:.2f}$`")
-        else:
-            await query.message.reply_text("🎊 **مبروك! وصلت للحد الأدنى.**\n\nيرجى كتابة رقم محفظتك أو ID اللعبة وسيتم التحويل خلال 24 ساعة.")
-    elif query.data == "share":
-        bot_info = await context.bot.get_me()
-        share_msg = (
-            f"🚀 **اربح الدولارات والجواهر مجاناً!**\n\n"
-            f"سجل من خلال رابطي واحصل على هدية دخول:\n"
-            f"https://t.me/{bot_info.username}?start={user_id}"
-        )
-        await query.message.reply_text(share_msg)
+    # إنشاء أسماء ملفات فريدة لتجنب التداخل
+    timestamp = int(time.time())
+    input_path = f"in_{timestamp}_{file_name}"
+    output_path = f"translated_by_Qais_{file_name}"
 
-def main():
-    init_db()
-    Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))).start()
-    tg_app.add_handler(CommandHandler("start", start))
-    tg_app.add_handler(CallbackQueryHandler(handle_callback))
-    print("🚀 BOT V9.0 IS LIVE WITH PRO UI")
-    tg_app.run_polling()
+    try:
+        # تحميل الملف من سيرفرات تلغرام
+        file_raw = bot.get_file(message.document.file_id)
+        file_bytes = bot.download_file(file_raw.file_path)
+        
+        with open(input_path, 'wb') as f:
+            f.write(file_bytes)
 
-if __name__ == "__main__": main()
-                    
+        # فتح المستند للبدء في التعديل
+        document = Document(input_path)
+        
+        # 1. معالجة الفقرات العادية
+        for paragraph in document.paragraphs:
+            original_text = paragraph.text.strip()
+            if len(original_text) > 3:
+                translated_text = perform_smart_translation(original_text)
+                if translated_text:
+                    # إضافة سطر جديد للنص المترجم
+                    run = paragraph.add_run(f"\n{translated_text}")
+                    # تنسيق لون الترجمة (أزرق سماوي غامق مريح للنظر)
+                    run.font.color.rgb = RGBColor(31, 73, 125)
+                    run.font.bold = True
+                    run.font.size = Pt(11)
+
+        # 2. معالجة النصوص داخل الجداول (لأنها غالباً ما تحتوي بيانات مهمة)
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        if len(paragraph.text.strip()) > 2:
+                            translated_text = perform_smart_translation(paragraph.text)
+                            if translated_text:
+                                run = paragraph.add_run(f"\n{translated_text}")
+                                run.font.color.rgb = RGBColor(31, 73, 125)
+                                run.font.italic = True
+
+        # حفظ التعديلات
+        document.save(output_path)
+
+        # إرسال الملف النهائي للمستخدم
+        with open(output_path, 'rb') as final_file:
+            # رسالة التم بالإنجليزي كما طلبت
+            bot.send_document(
+                message.chat.id, 
+                final_file, 
+                caption="Done! Translated by Qais AI System."
+            )
+
+    except Exception as global_error:
+        bot.reply_to(message, f"An error occurred: {str(global_error)}")
+    
+    finally:
+        # نظام التنظيف الذكي للملفات لتجنب امتلاء الذاكرة في Render
+        for temp_file in [input_path, output_path]:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+        # حذف رسالة "Please wait" بعد الانتهاء
+        try:
+            bot.delete_message(message.chat.id, progress_msg.message_id)
+        except:
+            pass
+
+# تشغيل البوت مع نظام الحماية من التوقف المفاجئ
+print("Qais AI Translation Bot is now Active...")
+while True:
+    try:
+        bot.polling(none_stop=True, interval=0, timeout=40)
+    except Exception as e:
+        print(f"Reconnect Log: {e}")
+        time.sleep(10)
+                
