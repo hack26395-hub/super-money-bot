@@ -1,3 +1,4 @@
 pyTelegramBotAPI
 python-docx
 google-generativeai
+pdf2docx
