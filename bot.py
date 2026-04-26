@@ -1,119 +1,109 @@
 import os
-import uuid
 import time
+import uuid
 import telebot
-import google.generativeai as genai
 from pdf2docx import Converter
 from docx import Document
-from docx.shared import RGBColor
-import traceback
+from docx.shared import RGBColor, Pt
+from googletrans import Translator
 
-# ========== التوكنات (التزم بها كما هي) ==========
-TELEGRAM_TOKEN = "8433118363:AAH0iqeZVo3xz-KP_KQ7LxHSdhRZnOmb2LQ"
-GEMINI_API_KEY = "AIzaSyCChd6IL-8hi9ttKOIwH-vVF57MzK8X26s"
+# --- الإعدادات ---
+TOKEN = "8433118363:AAH0iqeZVo3xz-KP_KQ7LxHSdhRZnOmb2LQ"
+bot = telebot.TeleBot(TOKEN)
+google_translator = Translator()
 
-# ========== إعداد البوت وذكاء قيس ==========
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
-genai.configure(api_key=GEMINI_API_KEY)
-
-# تعليمات النظام (البرومبت) ليكون سريع ومترجم عبقري
-model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash',
-    system_instruction="أنت 'ذكاء قيس'. وظيفتك الترجمة الاحترافية بلمسة علمية. ردودك سريعة ودقيقة."
-)
-
-def gemini_translate(text):
-    """استخدام الجيمني للترجمة بدلاً من المكتبات البطيئة"""
-    if not text.strip(): return ""
+def safe_translate(text):
+    """ترجمة آمنة وسريعة عبر محرك جوجل"""
+    if not text.strip() or len(text.strip()) < 2:
+        return ""
     try:
-        # نطلب منه الترجمة فقط لسرعة الرد
-        response = model.generate_content(f"Translate this to Arabic ONLY: {text}")
-        return response.text.strip()
+        res = google_translator.translate(text, src='en', dest='ar')
+        return res.text
     except:
-        return " (فشلت الترجمة) "
+        # محاولة ثانية في حال حدوث خطأ في الشبكة
+        try:
+            time.sleep(0.5)
+            res = google_translator.translate(text, src='en', dest='ar')
+            return res.text
+        except:
+            return ""
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    welcome = (
-        "🚀 أهلاً بك! أنا ذكاء قيس المطور.\n"
-        "أرسل لي أي ملف (PDF/DOCX) وسأترجمه لك بسرعة البرق مع الحفاظ على الصور.\n"
-        "أنا الآن أستخدم محرك Gemini 1.5 Flash السريع!"
-    )
-    bot.reply_to(message, welcome)
+    bot.reply_to(message, "أرسل ملف PDF أو DOCX للترجمة.")
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
-    start_time = time.time() # بدأنا حساب الوقت هنا
+    start_time = time.time()
     file_name = message.document.file_name
     ext = os.path.splitext(file_name)[1].lower()
-    
+
     if ext not in ['.pdf', '.docx']:
-        bot.reply_to(message, "❌ أرسل ملف PDF أو DOCX فقط يا بطل.")
         return
 
-    progress = bot.reply_to(message, "⏳ ذكاء قيس بدأ العمل... يرجى الانتظار.")
+    status = bot.reply_to(message, "Please wait...")
     
-    unique_id = uuid.uuid4().hex
-    input_path = f"in_{unique_id}{ext}"
-    docx_path = f"conv_{unique_id}.docx"
-    output_path = f"Qais_AI_{file_name}"
+    uid = uuid.uuid4().hex
+    in_file = f"in_{uid}{ext}"
+    tmp_docx = f"tmp_{uid}.docx"
+    out_file = f"Translated_{file_name}"
 
     try:
-        # تحميل الملف
+        # 1. تحميل الملف
         file_info = bot.get_file(message.document.file_id)
         downloaded = bot.download_file(file_info.file_path)
-        with open(input_path, 'wb') as f:
+        with open(in_file, 'wb') as f:
             f.write(downloaded)
 
-        # 1. تحويل الـ PDF إذا لزم الأمر
+        # 2. التحويل (إذا كان PDF) مع الحفاظ على الكائنات والصور
         if ext == '.pdf':
-            cv = Converter(input_path)
-            cv.convert(docx_path, start=0, end=None)
+            cv = Converter(in_file)
+            cv.convert(tmp_docx, start=0, end=None)
             cv.close()
-            target_file = docx_path
+            target = tmp_docx
         else:
-            target_file = input_path
+            target = in_file
 
-        # 2. الترجمة الاحترافية السريعة
-        doc = Document(target_file)
+        # 3. معالجة سطر بسطر (ترجمة تحت السطر مباشرة)
+        doc = Document(target)
         for para in doc.paragraphs:
-            if len(para.text.strip()) > 2:
-                translated = gemini_translate(para.text)
-                run = para.add_run(f"\n{translated}")
-                run.font.color.rgb = RGBColor(31, 73, 125)
-                run.font.italic = True
-                run.font.bold = True
+            original_text = para.text.strip()
+            if len(original_text) > 2:
+                translated = safe_translate(original_text)
+                if translated:
+                    # إضافة سطر جديد داخل نفس الفقرة ثم وضع الترجمة
+                    run = para.add_run(f"\n{translated}")
+                    run.font.color.rgb = RGBColor(31, 73, 125)
+                    run.font.italic = True
+                    run.font.size = Pt(10)
 
-        doc.save(output_path)
-        
-        # حساب الوقت المستغرق
-        end_time = time.time()
-        duration = round(end_time - start_time, 2)
+        # 4. حفظ وإرسال مع توقيت العملية
+        doc.save(out_file)
+        elapsed = round(time.time() - start_time, 2)
 
-        # إرسال الملف مع المؤقت
-        with open(output_path, 'rb') as f:
+        with open(out_file, 'rb') as f:
             bot.send_document(
                 message.chat.id, f, 
-                caption=f"✅ تمت الترجمة بنجاح!\n⏱ الوقت المستغرق: {duration} ثانية.\n👤 المطور: قيس"
+                caption=f"Done!\nTime: {elapsed}s"
             )
 
-    except Exception as e:
-        bot.reply_to(message, f"❌ حدث خطأ: {str(e)}")
+    except Exception:
+        bot.reply_to(message, "Error.")
     
     finally:
-        # تنظيف الملفات
-        for f in [input_path, docx_path, output_path]:
-            if os.path.exists(f): os.remove(f)
-        bot.delete_message(message.chat.id, progress.message_id)
+        # تنظيف السيرفر
+        for f in [in_file, tmp_docx, out_file]:
+            if os.path.exists(f):
+                try: os.remove(f)
+                except: pass
+        try: bot.delete_message(message.chat.id, status.message_id)
+        except: pass
 
-@bot.message_handler(func=lambda m: True)
-def chat(message):
-    """الرد على الأسئلة العلمية"""
-    try:
-        res = model.generate_content(message.text)
-        bot.reply_to(message, res.text)
-    except:
-        bot.reply_to(message, "أنا ذكاء قيس، اسألني أي شيء علمي!")
-
-bot.polling(none_stop=True)
-            
+# نظام الحماية من التوقف
+if __name__ == "__main__":
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=0, timeout=25)
+        except:
+            time.sleep(5)
+        
