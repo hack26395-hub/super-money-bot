@@ -2,35 +2,34 @@ import os
 import time
 import uuid
 import telebot
+import logging
 from pdf2docx import Converter
 from docx import Document
 from docx.shared import RGBColor, Pt
 from googletrans import Translator
 
-# --- الإعدادات ---
+# --- الإعدادات (ضع توكنك هنا) ---
 TOKEN = "8433118363:AAH0iqeZVo3xz-KP_KQ7LxHSdhRZnOmb2LQ"
 bot = telebot.TeleBot(TOKEN)
 google_translator = Translator()
 
+# إعداد السجلات لمراقبة الأخطاء في Render
+logging.basicConfig(level=logging.INFO)
+
 def safe_translate(text):
-    """ترجمة آمنة وسريعة عبر محرك جوجل"""
+    """دالة ترجمة مستقرة تتجنب الانقطاع"""
     if not text.strip() or len(text.strip()) < 2:
         return ""
     try:
         res = google_translator.translate(text, src='en', dest='ar')
         return res.text
-    except:
-        # محاولة ثانية في حال حدوث خطأ في الشبكة
-        try:
-            time.sleep(0.5)
-            res = google_translator.translate(text, src='en', dest='ar')
-            return res.text
-        except:
-            return ""
+    except Exception as e:
+        logging.error(f"Translation Error: {e}")
+        return ""
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.reply_to(message, "أرسل ملف PDF أو DOCX للترجمة.")
+    bot.reply_to(message, "أرسل ملف PDF أو DOCX للترجمة الفورية.")
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
@@ -41,69 +40,73 @@ def handle_docs(message):
     if ext not in ['.pdf', '.docx']:
         return
 
-    status = bot.reply_to(message, "Please wait...")
+    status_msg = bot.reply_to(message, "⏳ جاري المعالجة...")
     
+    # توليد أسماء فريدة لمنع التداخل في Render
     uid = uuid.uuid4().hex
-    in_file = f"in_{uid}{ext}"
-    tmp_docx = f"tmp_{uid}.docx"
-    out_file = f"Translated_{file_name}"
+    input_path = f"in_{uid}{ext}"
+    output_docx = f"Translated_{file_name.split('.')[0]}.docx"
 
     try:
-        # 1. تحميل الملف
+        # تحميل الملف
         file_info = bot.get_file(message.document.file_id)
         downloaded = bot.download_file(file_info.file_path)
-        with open(in_file, 'wb') as f:
+        with open(input_path, 'wb') as f:
             f.write(downloaded)
 
-        # 2. التحويل (إذا كان PDF) مع الحفاظ على الكائنات والصور
+        # إذا كان الملف PDF نحوله لـ Word أولاً للحفاظ على الصور والتنسيق
         if ext == '.pdf':
-            cv = Converter(in_file)
-            cv.convert(tmp_docx, start=0, end=None)
+            docx_tmp = f"tmp_{uid}.docx"
+            cv = Converter(input_path)
+            cv.convert(docx_tmp, start=0, end=None)
             cv.close()
-            target = tmp_docx
+            working_file = docx_tmp
         else:
-            target = in_file
+            working_file = input_path
 
-        # 3. معالجة سطر بسطر (ترجمة تحت السطر مباشرة)
-        doc = Document(target)
+        # فتح المستند والترجمة (سطر تحت سطر)
+        doc = Document(working_file)
         for para in doc.paragraphs:
-            original_text = para.text.strip()
-            if len(original_text) > 2:
-                translated = safe_translate(original_text)
+            original = para.text.strip()
+            if len(original) > 2:
+                translated = safe_translate(original)
                 if translated:
-                    # إضافة سطر جديد داخل نفس الفقرة ثم وضع الترجمة
+                    # إضافة الترجمة بتنسيق احترافي تحت النص الأصلي
                     run = para.add_run(f"\n{translated}")
-                    run.font.color.rgb = RGBColor(31, 73, 125)
+                    run.font.color.rgb = RGBColor(31, 73, 125) # أزرق
                     run.font.italic = True
                     run.font.size = Pt(10)
 
-        # 4. حفظ وإرسال مع توقيت العملية
-        doc.save(out_file)
+        doc.save(output_docx)
         elapsed = round(time.time() - start_time, 2)
 
-        with open(out_file, 'rb') as f:
+        # إرسال الملف النهائي
+        with open(output_docx, 'rb') as f:
             bot.send_document(
                 message.chat.id, f, 
                 caption=f"Done!\nTime: {elapsed}s"
             )
 
-    except Exception:
-        bot.reply_to(message, "Error.")
+    except Exception as e:
+        logging.error(f"General Error: {e}")
+        bot.reply_to(message, "Error processing file.")
     
     finally:
-        # تنظيف السيرفر
-        for f in [in_file, tmp_docx, out_file]:
-            if os.path.exists(f):
+        # تنظيف السيرفر فوراً لمنع امتلاء الذاكرة في Render
+        for f in [input_path, output_docx, f"tmp_{uid}.docx" if ext == '.pdf' else ""]:
+            if f and os.path.exists(f):
                 try: os.remove(f)
                 except: pass
-        try: bot.delete_message(message.chat.id, status.message_id)
+        try: bot.delete_message(message.chat.id, status_msg.message_id)
         except: pass
 
-# نظام الحماية من التوقف
+# أهم جزء لـ Render: نظام الحماية من التوقف وإعادة التشغيل التلقائي
 if __name__ == "__main__":
     while True:
         try:
-            bot.polling(none_stop=True, interval=0, timeout=25)
-        except:
-            time.sleep(5)
-        
+            logging.info("Bot is starting...")
+            bot.polling(none_stop=True, interval=0, timeout=20)
+        except Exception as e:
+            logging.error(f"Bot crashed: {e}")
+            time.sleep(5) # انتظر 5 ثواني ثم أعد التشغيل تلقائياً
+    
